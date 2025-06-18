@@ -3,14 +3,15 @@
 """
 DVDS数据清洗主程序
 功能：将ASEData/DVDS目录下的xlsx测试数据文件清洗整理成统一格式
-作者：AI Assistant
-创建时间：2025-01-03
+作者：cc
+创建时间：20250618
 """
 
 import os
 import pandas as pd
 from datetime import datetime
 import logging
+import re
 
 # 配置日志
 logging.basicConfig(
@@ -89,6 +90,32 @@ class DVDSCleaner:
             logging.error(f"扫描文件时发生错误: {str(e)}")
             return []
     
+    def extract_batch_info(self, file_path):
+        """
+        从文件名中提取批次信息
+        
+        Args:
+            file_path (str): 文件路径
+            
+        Returns:
+            str: 批次字符串（使用正则表达式提取FA4Z-2484这样的模式）
+        """
+        filename = os.path.basename(file_path)
+        
+        # 使用正则表达式提取形如FA4Z-2484的模式（4个字母数字 + 短横线 + 4个数字）
+        pattern = r'[A-Z0-9]{4}-[0-9]{4}'
+        match = re.search(pattern, filename)
+        
+        if match:
+            lot_id = match.group()
+            logging.debug(f"提取批次信息: {filename} -> {lot_id}")
+            return lot_id
+        else:
+            # 如果正则匹配失败，回退到使用完整文件名
+            lot_id = os.path.splitext(filename)[0]
+            logging.warning(f"正则匹配失败，使用完整文件名: {filename} -> {lot_id}")
+            return lot_id
+    
     def extract_dvds_data(self, file_path):
         """
         从单个xlsx文件中提取DVDS数据
@@ -163,8 +190,8 @@ class DVDSCleaner:
             
             # 5. 创建结果DataFrame
             if dvds_values:
-                # 从文件名提取lot_ID (去掉扩展名)
-                lot_id = os.path.splitext(filename)[0]
+                # 从文件名提取lot_ID (使用正则表达式)
+                lot_id = self.extract_batch_info(file_path)
                 
                 result_df = pd.DataFrame({
                     'lot_ID': [lot_id] * len(dvds_values),

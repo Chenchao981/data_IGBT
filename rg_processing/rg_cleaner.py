@@ -94,8 +94,28 @@ class RGCleaner:
         return None
     
     def extract_lot_id(self, filename):
-        """直接使用完整文件名作为lot_ID"""
-        return Path(filename).stem
+        """
+        从文件名中提取批次信息
+        
+        Args:
+            filename: 文件名
+            
+        Returns:
+            str: 批次字符串（使用正则表达式提取FA4Z-2484这样的模式）
+        """
+        # 使用正则表达式提取形如FA4Z-2484的模式（4个字母数字 + 短横线 + 4个数字）
+        pattern = r'[A-Z0-9]{4}-[0-9]{4}'
+        match = re.search(pattern, filename)
+        
+        if match:
+            lot_id = match.group()
+            self.logger.debug(f"提取批次信息: {filename} -> {lot_id}")
+            return lot_id
+        else:
+            # 如果正则匹配失败，回退到使用完整文件名
+            lot_id = Path(filename).stem
+            self.logger.warning(f"正则匹配失败，使用完整文件名: {filename} -> {lot_id}")
+            return lot_id
     
     def extract_rg_data(self, file_path):
         """从单个xlsx文件中提取RG数据"""

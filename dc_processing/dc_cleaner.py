@@ -4,8 +4,8 @@
 """
 DC数据清洗器 - 主程序
 功能：将ASEData/DC目录下的所有xlsx测试数据文件清洗整理成统一格式的DC数据文件
-作者：AI助手
-创建时间：2025-01-20
+作者：cc
+创建时间：2025-06-18
 """
 
 import os
@@ -22,7 +22,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('dc_processing/dc_cleaner.log', encoding='utf-8'),
+        logging.FileHandler('dc_cleaner.log', encoding='utf-8'),
         logging.StreamHandler()
     ]
 )
@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 class DCDataCleaner:
     """DC数据清洗器主类"""
     
-    def __init__(self, input_dir: str = "ASEData/DC", output_dir: str = "output"):
+    def __init__(self, input_dir: str = "../ASEData/DC", output_dir: str = "../output"):
         """
         初始化DC数据清洗器
         
@@ -82,12 +82,73 @@ class DCDataCleaner:
             file_path: 文件路径
             
         Returns:
-            批次字符串（完整文件名去掉扩展名）
+            批次字符串（使用正则表达式提取FA4Z-2484这样的模式）
         """
-        lot_id = file_path.stem  # 直接使用文件名去掉扩展名
-        logger.debug(f"提取批次信息: {file_path.name} -> {lot_id}")
-        return lot_id
+        filename = file_path.name
+        
+        # 使用正则表达式提取形如FA4Z-2484的模式（4个字母数字 + 短横线 + 4个数字）
+        pattern = r'[A-Z0-9]{4}-[0-9]{4}'
+        match = re.search(pattern, filename)
+        
+        if match:
+            lot_id = match.group()
+            logger.debug(f"提取批次信息: {filename} -> {lot_id}")
+            return lot_id
+        else:
+            # 如果正则匹配失败，回退到使用完整文件名
+            lot_id = file_path.stem
+            logger.warning(f"正则匹配失败，使用完整文件名: {filename} -> {lot_id}")
+            return lot_id
     
+    def extract_test_condition_value(self, df: pd.DataFrame, param_col: int) -> Optional[str]:
+        """
+        提取IDSS参数的测试条件数值
+        
+        Args:
+            df: Excel数据表
+            param_col: IDSS参数所在列
+            
+        Returns:
+            测试条件数值字符串，如"40.0"，失败返回None
+        """
+        try:
+            # 第5行（索引4）是测试条件行，第7列（索引6）是Bias1
+            if df.shape[0] < 5:
+                logger.warning("文件行数不足，无法获取测试条件行")
+                return None
+            
+            row5 = df.iloc[4, :]  # 第5行（索引4）
+            
+            # 获取IDSS参数对应列的测试条件
+            if param_col < len(row5):
+                condition_value = row5.iloc[param_col]
+                if pd.isna(condition_value):
+                    logger.debug(f"IDSS参数列{param_col}的测试条件为空")
+                    return None
+                
+                condition_str = str(condition_value).strip()
+                logger.debug(f"IDSS测试条件原始值: '{condition_str}'")
+                
+                # 使用正则表达式提取数值部分
+                # 匹配类似 "(VDS)40.0V" 或 "40.0V" 中的数值部分
+                pattern = r'(\d+\.?\d*)'
+                match = re.search(pattern, condition_str)
+                
+                if match:
+                    numeric_value = match.group(1)
+                    logger.debug(f"提取到IDSS测试条件数值: '{numeric_value}'")
+                    return numeric_value
+                else:
+                    logger.warning(f"无法从测试条件中提取数值: '{condition_str}'")
+                    return None
+            else:
+                logger.warning(f"IDSS参数列{param_col}超出测试条件行范围")
+                return None
+                
+        except Exception as e:
+            logger.error(f"提取IDSS测试条件时出错: {str(e)}")
+            return None
+
     def extract_dc_data(self, file_path: Path) -> Optional[pd.DataFrame]:
         """
         从单个xlsx文件中提取DC测试数据
@@ -146,12 +207,30 @@ class DCDataCleaner:
                 
             row6 = df.iloc[6, :]  # 第6行（索引6）单位行
             
-            # 4. 参数-单位匹配
+            # 4. 参数-单位匹配，特殊处理IDSS参数
             param_unit_pairs = []
             for col, param in test_params:
                 unit_val = row6.iloc[col] if col < len(row6) else None
-                unit_name = str(unit_val).strip() if not pd.isna(unit_val) else 'N/A'
-                param_unit_pairs.append((col, param, unit_name))
+                # 单位为空时设为None，避免显示N/A
+                if pd.isna(unit_val) or str(unit_val).strip() == '':
+                    unit_name = None
+                else:
+                    unit_name = str(unit_val).strip()
+                
+                # 特殊处理IDSS和ISGS参数：添加测试条件
+                if param.upper() in ['IDSS', 'ISGS']:
+                    test_condition = self.extract_test_condition_value(df, col)
+                    if test_condition:
+                        # 将IDSS/ISGS改为IDSS/ISGS+测试条件，如IDSS40.0, ISGS40.0
+                        enhanced_param = f"{param}{test_condition}"
+                        logger.info(f"{param}参数增强: {param} -> {enhanced_param}")
+                        param_unit_pairs.append((col, enhanced_param, unit_name))
+                    else:
+                        # 如果无法提取测试条件，保持原参数名
+                        logger.warning(f"无法为{param}参数提取测试条件，保持原名: {param}")
+                        param_unit_pairs.append((col, param, unit_name))
+                else:
+                    param_unit_pairs.append((col, param, unit_name))
             
             # 5. 重复参数编号处理
             from collections import Counter
@@ -172,7 +251,11 @@ class DCDataCleaner:
                     else:
                         numbered_param = param
                 
-                final_param_name = f"{numbered_param}({unit})"
+                # 只有当单位不为空时才添加括号
+                if unit is not None:
+                    final_param_name = f"{numbered_param}({unit})"
+                else:
+                    final_param_name = numbered_param
                 final_params.append((col, final_param_name))
             
             logger.debug(f"最终参数列表: {[param[1] for param in final_params]}")

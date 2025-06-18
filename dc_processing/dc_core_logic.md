@@ -49,7 +49,7 @@ for i in range(cont_col + 1, len(row1)):
         test_params.append((i, param_name))
 ```
 
-### 3. 获取参数单位
+### 3. 获取参数单位并进行参数名称增强
 
 ```python
 # 从第6行获取对应位置的单位
@@ -57,8 +57,46 @@ param_unit_pairs = []
 for col, param in test_params:
     unit_val = row6.iloc[col] if col < len(row6) else None
     unit_name = str(unit_val).strip() if not pd.isna(unit_val) else 'N/A'
-    param_unit_pairs.append((col, param, unit_name))
+    
+    # 特殊处理IDSS和ISGS参数：添加测试条件
+    if param.upper() in ['IDSS', 'ISGS']:
+        test_condition = self.extract_test_condition_value(df, col)
+        if test_condition:
+            # 将IDSS/ISGS改为IDSS/ISGS+测试条件，如IDSS40.0, ISGS25.0
+            enhanced_param = f"{param}{test_condition}"
+            param_unit_pairs.append((col, enhanced_param, unit_name))
+        else:
+            param_unit_pairs.append((col, param, unit_name))
+    else:
+        param_unit_pairs.append((col, param, unit_name))
 ```
+
+#### 3.1 参数名称增强功能
+
+对于IDSS和ISGS参数，系统会自动从第5行（索引4）提取测试条件数值：
+
+```python
+def extract_test_condition_value(self, df: pd.DataFrame, param_col: int) -> Optional[str]:
+    """
+    提取IDSS/ISGS参数的测试条件数值
+    从第5行对应列中提取数值部分，如从"(VDS)40.0V"中提取"40.0"
+    """
+    row5 = df.iloc[4, :]  # 第5行（索引4）
+    condition_value = row5.iloc[param_col]
+    
+    # 使用正则表达式提取数值部分
+    pattern = r'(\d+\.?\d*)'
+    match = re.search(pattern, str(condition_value))
+    
+    if match:
+        return match.group(1)  # 返回提取的数值
+    return None
+```
+
+**增强效果：**
+
+- `IDSS` → `IDSS40.0` (测试条件40.0V)
+- `ISGS` → `ISGS25.0` (测试条件25.0V)
 
 ### 4. 重复参数编号
 
@@ -84,28 +122,34 @@ for col, param, unit in param_unit_pairs:
 
 ## 实际提取结果
 
-基于当前文件，最终参数列表为：
+基于当前文件，最终参数列表为（含参数名称增强）：
 
-| 列索引 | 原参数名 | 编号后参数名 | 单位 | 最终列名 |
-|--------|----------|--------------|------|----------|
-| 8      | VTH      | VTH1         | V    | VTH1(V)  |
-| 10     | VTH      | VTH2         | V    | VTH2(V)  |
-| 12     | BVDSS    | BVDSS1       | V    | BVDSS1(V) |
-| 14     | BVDSS    | BVDSS2       | V    | BVDSS2(V) |
-| 16     | IDSS     | IDSS1        | nA   | IDSS1(nA) |
-| 17     | ISGS     | ISGS1        | nA   | ISGS1(nA) |
-| 18     | ISGS     | ISGS2        | nA   | ISGS2(nA) |
-| 19     | ISGS     | ISGS3        | nA   | ISGS3(nA) |
-| 20     | ISGS     | ISGS4        | nA   | ISGS4(nA) |
-| 21     | LRDON    | LRDON1       | mR   | LRDON1(mR) |
-| 23     | LRDON    | LRDON2       | mR   | LRDON2(mR) |
-| 25     | HVFSD+   | HVFSD+       | V    | HVFSD+(V) |
-| 27     | IDSS     | IDSS2        | nA   | IDSS2(nA) |
-| 28     | ISGS     | ISGS5        | nA   | ISGS5(nA) |
-| 29     | ISGS     | ISGS6        | nA   | ISGS6(nA) |
-| 30     | VTH      | VTH3         | V    | VTH3(V)  |
-| 32     | ABSDEL   | ABSDEL1      | N/A  | ABSDEL1(N/A) |
-| 33     | ABSDEL   | ABSDEL2      | N/A  | ABSDEL2(N/A) |
+| 列索引 | 原参数名 | 增强后参数名 | 编号后参数名 | 单位 | 最终列名 |
+|--------|----------|-------------|--------------|------|----------|
+| 8      | VTH      | VTH         | VTH1         | V    | VTH1(V)  |
+| 10     | VTH      | VTH         | VTH2         | V    | VTH2(V)  |
+| 12     | BVDSS    | BVDSS       | BVDSS1       | V    | BVDSS1(V) |
+| 14     | BVDSS    | BVDSS       | BVDSS2       | V    | BVDSS2(V) |
+| 16     | IDSS     | IDSS40.0    | IDSS40.0     | nA   | IDSS40.0(nA) |
+| 17     | ISGS     | ISGS25.0    | ISGS25.01    | nA   | ISGS25.01(nA) |
+| 18     | ISGS     | ISGS25.0    | ISGS25.02    | nA   | ISGS25.02(nA) |
+| 19     | ISGS     | ISGS20.0    | ISGS20.01    | nA   | ISGS20.01(nA) |
+| 20     | ISGS     | ISGS20.0    | ISGS20.02    | nA   | ISGS20.02(nA) |
+| 21     | LRDON    | LRDON       | LRDON1       | mR   | LRDON1(mR) |
+| 23     | LRDON    | LRDON       | LRDON2       | mR   | LRDON2(mR) |
+| 25     | HVFSD+   | HVFSD+      | HVFSD+       | V    | HVFSD+(V) |
+| 27     | IDSS     | IDSS35.0    | IDSS35.0     | nA   | IDSS35.0(nA) |
+| 28     | ISGS     | ISGS10.0    | ISGS10.01    | nA   | ISGS10.01(nA) |
+| 29     | ISGS     | ISGS10.0    | ISGS10.02    | nA   | ISGS10.02(nA) |
+| 30     | VTH      | VTH         | VTH3         | V    | VTH3(V)  |
+| 32     | ABSDEL   | ABSDEL      | ABSDEL1      | N/A  | ABSDEL1 |
+| 33     | ABSDEL   | ABSDEL      | ABSDEL2      | N/A  | ABSDEL2 |
+
+**注意：**
+
+- IDSS和ISGS参数经过名称增强，添加了测试条件数值
+- 增强后的参数名在重复参数编号时仍然有效
+- 其他参数保持原有处理方式
 
 ## 数据提取流程
 
@@ -154,10 +198,11 @@ NUM | lot_ID | VTH1(V) | VTH2(V) | BVDSS1(V) | ... | ABSDEL2(N/A)
 
 1. **SAME列跳过**：第1行中值为"SAME"的列不参与数据提取
 2. **单位匹配**：第6行Unit列右边对应位置获取单位信息
-3. **重复参数编号**：按出现顺序编号（VTH1, VTH2, VTH3）
-4. **数据起始精确定位**：Test No.行的下一行即为数据开始
-5. **批次信息**：直接使用文件名（去掉.xlsx扩展名）
-6. **列名格式**：参数名(单位)，如VTH1(V)
+3. **参数名称增强**：IDSS和ISGS参数会自动添加测试条件数值（如IDSS40.0）
+4. **重复参数编号**：按出现顺序编号（VTH1, VTH2, VTH3），增强后的参数同样适用
+5. **数据起始精确定位**：Test No.行的下一行即为数据开始
+6. **批次信息**：使用正则表达式提取（如FA4Z-2484）或文件名
+7. **列名格式**：参数名(单位)，如VTH1(V)、IDSS40.0(nA)
 
 ## 边界情况处理
 
