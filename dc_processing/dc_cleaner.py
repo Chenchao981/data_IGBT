@@ -100,53 +100,54 @@ class DCDataCleaner:
             logger.warning(f"正则匹配失败，使用完整文件名: {filename} -> {lot_id}")
             return lot_id
     
-    def extract_test_condition_value(self, df: pd.DataFrame, param_col: int) -> Optional[str]:
+    def extract_test_condition_value(self, df: pd.DataFrame, param_col: int, row_index: int = 4) -> Optional[str]:
         """
-        提取IDSS参数的测试条件数值
+        提取参数的测试条件数值
         
         Args:
             df: Excel数据表
-            param_col: IDSS参数所在列
+            param_col: 参数所在列
+            row_index: 测试条件所在行索引（默认为4，即第5行）
             
         Returns:
             测试条件数值字符串，如"40.0"，失败返回None
         """
         try:
-            # 第5行（索引4）是测试条件行，第7列（索引6）是Bias1
-            if df.shape[0] < 5:
-                logger.warning("文件行数不足，无法获取测试条件行")
+            # 检查行数是否足够
+            if df.shape[0] < row_index + 1:
+                logger.warning(f"文件行数不足，无法获取第{row_index + 1}行测试条件")
                 return None
             
-            row5 = df.iloc[4, :]  # 第5行（索引4）
+            target_row = df.iloc[row_index, :]  # 获取指定行
             
-            # 获取IDSS参数对应列的测试条件
-            if param_col < len(row5):
-                condition_value = row5.iloc[param_col]
+            # 获取参数对应列的测试条件
+            if param_col < len(target_row):
+                condition_value = target_row.iloc[param_col]
                 if pd.isna(condition_value):
-                    logger.debug(f"IDSS参数列{param_col}的测试条件为空")
+                    logger.debug(f"参数列{param_col}在第{row_index + 1}行的测试条件为空")
                     return None
                 
                 condition_str = str(condition_value).strip()
-                logger.debug(f"IDSS测试条件原始值: '{condition_str}'")
+                logger.debug(f"第{row_index + 1}行测试条件原始值: '{condition_str}'")
                 
                 # 使用正则表达式提取数值部分
-                # 匹配类似 "(VDS)40.0V" 或 "40.0V" 中的数值部分
+                # 匹配类似 "(VDS)40.0V" 或 "(VG)10.0V" 或 "40.0V" 中的数值部分
                 pattern = r'(\d+\.?\d*)'
                 match = re.search(pattern, condition_str)
                 
                 if match:
                     numeric_value = match.group(1)
-                    logger.debug(f"提取到IDSS测试条件数值: '{numeric_value}'")
+                    logger.debug(f"提取到测试条件数值: '{numeric_value}'")
                     return numeric_value
                 else:
                     logger.warning(f"无法从测试条件中提取数值: '{condition_str}'")
                     return None
             else:
-                logger.warning(f"IDSS参数列{param_col}超出测试条件行范围")
+                logger.warning(f"参数列{param_col}超出第{row_index + 1}行范围")
                 return None
                 
         except Exception as e:
-            logger.error(f"提取IDSS测试条件时出错: {str(e)}")
+            logger.error(f"提取第{row_index + 1}行测试条件时出错: {str(e)}")
             return None
 
     def extract_dc_data(self, file_path: Path) -> Optional[pd.DataFrame]:
@@ -217,9 +218,10 @@ class DCDataCleaner:
                 else:
                     unit_name = str(unit_val).strip()
                 
-                # 特殊处理IDSS和ISGS参数：添加测试条件
+                # 特殊处理IDSS、ISGS和LRDON参数：添加测试条件
                 if param.upper() in ['IDSS', 'ISGS']:
-                    test_condition = self.extract_test_condition_value(df, col)
+                    # IDSS和ISGS从第5行（索引4）提取测试条件
+                    test_condition = self.extract_test_condition_value(df, col, row_index=4)
                     if test_condition:
                         # 将IDSS/ISGS改为IDSS/ISGS+测试条件，如IDSS40.0, ISGS40.0
                         enhanced_param = f"{param}{test_condition}"
@@ -228,6 +230,18 @@ class DCDataCleaner:
                     else:
                         # 如果无法提取测试条件，保持原参数名
                         logger.warning(f"无法为{param}参数提取测试条件，保持原名: {param}")
+                        param_unit_pairs.append((col, param, unit_name))
+                elif param.upper() == 'LRDON':
+                    # LRDON从第6行（索引5）提取测试条件2
+                    test_condition = self.extract_test_condition_value(df, col, row_index=5)
+                    if test_condition:
+                        # 将LRDON改为LRDON+测试条件2，如LRDON10.0
+                        enhanced_param = f"{param}{test_condition}"
+                        logger.info(f"{param}参数增强: {param} -> {enhanced_param}")
+                        param_unit_pairs.append((col, enhanced_param, unit_name))
+                    else:
+                        # 如果无法提取测试条件，保持原参数名
+                        logger.warning(f"无法为{param}参数提取测试条件2，保持原名: {param}")
                         param_unit_pairs.append((col, param, unit_name))
                 else:
                     param_unit_pairs.append((col, param, unit_name))
