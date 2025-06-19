@@ -122,8 +122,8 @@ class RGCleaner:
         self.logger.info(f"处理文件: {file_path.name}")
         
         try:
-            # 读取Excel文件
-            df = pd.read_excel(file_path, header=None)
+            # 读取Excel文件 - 使用calamine引擎提升读取速度
+            df = pd.read_excel(file_path, header=None, engine='calamine')
             
             # 1. 定位RG标识
             rg_pos = self.locate_rg_header(df)
@@ -256,8 +256,8 @@ class RGCleaner:
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         output_file = self.output_dir / f"RG_{timestamp}.xlsx"
         
-        # 保存到Excel文件
-        df.to_excel(output_file, index=False)
+        # 保存到Excel文件 - 使用xlsxwriter引擎提升写入速度
+        df.to_excel(output_file, index=False, engine='xlsxwriter')
         
         self.logger.info(f"RG数据已保存到: {output_file}")
         self.logger.info(f"文件包含 {len(df)} 条RG数据")

@@ -136,8 +136,8 @@ class DVDSCleaner:
             filename = os.path.basename(file_path)
             logging.info(f"开始提取DVDS数据: {filename}")
             
-            # 读取Excel文件
-            df = pd.read_excel(file_path, header=None)
+            # 读取Excel文件 - 使用calamine引擎提升读取速度
+            df = pd.read_excel(file_path, header=None, engine='calamine')
             logging.info(f"文件形状: {df.shape}")
             
             # 1. 在第2行查找DVDS列
@@ -320,8 +320,8 @@ class DVDSCleaner:
             filename = f"DVDS_{timestamp}.xlsx"
             filepath = os.path.join(self.output_dir, filename)
             
-            # 保存到Excel
-            df.to_excel(filepath, index=False, engine='openpyxl')
+            # 保存到Excel - 使用xlsxwriter引擎提升写入速度
+            df.to_excel(filepath, index=False, engine='xlsxwriter')
             
             logging.info(f"数据保存成功: {filepath}")
             logging.info(f"保存了 {len(df)} 行数据")
