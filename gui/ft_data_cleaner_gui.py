@@ -1,4 +1,4 @@
-c'dcd#!/usr/bin/env python3
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 FT数据清洗工具 - GUI版本
@@ -249,18 +249,16 @@ class FTDataCleanerGUI(QMainWindow):
         """创建操作按钮组"""
         button_layout = QHBoxLayout()
         
-        # 开始清洗按钮
+        # 开始清洗按钮 - 居中显示
         self.start_btn = QPushButton("🚀 开始清洗数据")
         self.start_btn.clicked.connect(self.start_cleaning)
-        self.start_btn.setMinimumHeight(40)
+        self.start_btn.setMinimumHeight(50)
+        self.start_btn.setMinimumWidth(200)
         
-        # 生成图表按钮（暂时禁用）
-        self.chart_btn = QPushButton("📊 生成图表")
-        self.chart_btn.setEnabled(False)
-        self.chart_btn.setMinimumHeight(40)
-        
+        # 添加弹性空间使按钮居中
+        button_layout.addStretch()
         button_layout.addWidget(self.start_btn)
-        button_layout.addWidget(self.chart_btn)
+        button_layout.addStretch()
         
         main_layout.addLayout(button_layout)
     
@@ -348,25 +346,15 @@ class FTDataCleanerGUI(QMainWindow):
     
     def setup_default_paths(self):
         """设置默认路径"""
-        # 获取项目根目录
-        project_root = Path(__file__).parent.parent
+        # 获取Windows桌面路径
+        desktop_path = os.path.join(os.path.expanduser("~"), "Desktop")
         
-        # 设置默认输入路径为项目的ASEData/DC目录
-        default_input_path = project_root / "ASEData" / "DC"
-        # 设置默认输出路径为项目的output目录
-        default_output_path = project_root / "output"
+        # 设置默认路径为桌面
+        self.input_path_edit.setText(desktop_path)
+        self.output_path_edit.setText(desktop_path)
         
-        # 如果ASEData目录不存在，回退到桌面
-        if not default_input_path.parent.exists():
-            desktop_path = os.path.join(os.path.expanduser("~"), "Desktop")
-            self.input_path_edit.setText(desktop_path)
-            self.output_path_edit.setText(desktop_path)
-            self.log_message(f"ASEData目录不存在，默认路径设置为桌面: {desktop_path}")
-        else:
-            self.input_path_edit.setText(str(default_input_path))
-            self.output_path_edit.setText(str(default_output_path))
-            self.log_message(f"默认输入路径: {default_input_path}")
-            self.log_message(f"默认输出路径: {default_output_path}")
+        self.log_message(f"默认路径设置为桌面: {desktop_path}")
+        self.log_message("请选择包含ASEData文件夹的目录作为输入路径")
     
     def browse_input_folder(self):
         """浏览选择输入文件夹"""
@@ -400,22 +388,53 @@ class FTDataCleanerGUI(QMainWindow):
             return "RG"
         return None
     
+    def determine_input_directory(self, selected_path, cleaner_type):
+        """
+        智能判断输入目录路径
+        
+        Args:
+            selected_path: 用户选择的路径
+            cleaner_type: 清洗类型 (DC/DVDS/RG)
+        
+        Returns:
+            str: 最终的输入目录路径
+        """
+        selected_path = Path(selected_path)
+        
+        # 情况1: 用户直接选择了具体的数据目录 (如 ASEData/DC)
+        if (selected_path.name == cleaner_type and 
+            selected_path.parent.name == "ASEData"):
+            self.log_message(f"检测到直接选择数据目录: {selected_path}")
+            return str(selected_path)
+        
+        # 情况2: 用户选择了ASEData目录，需要添加类型
+        if selected_path.name == "ASEData":
+            target_dir = selected_path / cleaner_type
+            self.log_message(f"检测到ASEData目录，构建路径: {target_dir}")
+            return str(target_dir)
+        
+        # 情况3: 用户选择了包含ASEData的根目录
+        asedata_dir = selected_path / "ASEData" / cleaner_type
+        if asedata_dir.exists():
+            self.log_message(f"检测到根目录，构建路径: {asedata_dir}")
+            return str(asedata_dir)
+        
+        # 情况4: 检查是否已经是完整的ASEData/{type}路径
+        if "ASEData" in str(selected_path) and cleaner_type in str(selected_path):
+            self.log_message(f"检测到完整ASEData路径: {selected_path}")
+            return str(selected_path)
+        
+        # 默认情况: 尝试在选择的路径下查找ASEData/{type}
+        default_path = selected_path / "ASEData" / cleaner_type
+        self.log_message(f"使用默认路径构建: {default_path}")
+        return str(default_path)
+    
     def on_cleaner_type_changed(self):
-        """当清洗类型改变时更新默认输入路径"""
+        """当清洗类型改变时记录日志"""
         cleaner_type = self.get_selected_cleaner_type()
         if cleaner_type:
-            project_root = Path(__file__).parent.parent
-            default_input_path = project_root / "ASEData" / cleaner_type
-            
-            # 只有当前路径是项目内的ASEData路径时才自动切换
-            current_path = Path(self.input_path_edit.text())
-            try:
-                # 检查当前路径是否在项目的ASEData目录下
-                if current_path.parent.name == "ASEData":
-                    self.input_path_edit.setText(str(default_input_path))
-                    self.log_message(f"切换到{cleaner_type}模式，输入路径: {default_input_path}")
-            except:
-                pass  # 如果路径无效，忽略自动切换
+            self.log_message(f"切换到{cleaner_type}清洗模式")
+            self.log_message(f"请选择包含ASEData/{cleaner_type}文件夹的目录")
     
     def start_cleaning(self):
         """开始数据清洗过程"""
@@ -425,15 +444,18 @@ class FTDataCleanerGUI(QMainWindow):
         
         # 获取参数
         cleaner_type = self.get_selected_cleaner_type()
-        input_dir = self.input_path_edit.text().strip()
+        selected_input_dir = self.input_path_edit.text().strip()
         output_dir = self.output_path_edit.text().strip()
         
-        # 检查输入目录是否存在
+        # 智能判断用户选择的路径类型
+        input_dir = self.determine_input_directory(selected_input_dir, cleaner_type)
+        
+        # 检查最终的输入目录是否存在
         if not os.path.exists(input_dir):
             QMessageBox.warning(
                 self, 
                 "目录不存在", 
-                f"输入目录不存在:\n{input_dir}\n\n请选择正确的数据文件夹"
+                f"找不到数据目录:\n{input_dir}\n\n请选择以下之一：\n1. 包含ASEData文件夹的根目录\n2. 直接选择ASEData/{cleaner_type}数据目录"
             )
             return
         

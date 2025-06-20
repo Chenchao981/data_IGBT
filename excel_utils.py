@@ -241,6 +241,28 @@ def generate_output_filename(prefix: str, extension: str = ".xlsx") -> str:
     return optimizer.generate_output_filename(prefix, extension)
 
 
+def generate_lot_based_filename(lot_ids: list, data_type: str, extension: str = ".xlsx") -> str:
+    """
+    基于lot_id生成输出文件名
+    
+    Args:
+        lot_ids: lot_id列表
+        data_type: 数据类型 (DC/DVDS/RG)
+        extension: 文件扩展名
+        
+    Returns:
+        str: 生成的文件名
+    """
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    
+    # 如果只有一个lot_id，直接使用
+    if len(set(lot_ids)) == 1:
+        return f"{lot_ids[0]}_{data_type}_{timestamp}{extension}"
+    else:
+        # 如果有多个lot_id，使用"mixed"表示
+        return f"mixed_{data_type}_{timestamp}{extension}"
+
+
 # 性能统计工具
 class PerformanceStats:
     """性能统计工具"""

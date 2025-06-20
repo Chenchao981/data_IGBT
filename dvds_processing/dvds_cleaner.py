@@ -12,6 +12,14 @@ import pandas as pd
 from datetime import datetime
 import logging
 import re
+import sys
+from pathlib import Path
+
+# 添加项目根目录到路径
+project_root = Path(__file__).parent.parent
+sys.path.append(str(project_root))
+
+from excel_utils import generate_lot_based_filename
 
 # 配置日志
 logging.basicConfig(
@@ -313,11 +321,11 @@ class DVDSCleaner:
                 logging.warning("没有数据需要保存")
                 return ""
             
-            # 生成时间戳
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            # 提取lot_ids用于生成文件名
+            lot_ids = df['lot_ID'].tolist() if 'lot_ID' in df.columns else ['unknown']
             
-            # 构造文件名
-            filename = f"DVDS_{timestamp}.xlsx"
+            # 使用lot_id生成文件名
+            filename = generate_lot_based_filename(lot_ids, "DVDS")
             filepath = os.path.join(self.output_dir, filename)
             
             # 保存到Excel - 使用xlsxwriter引擎提升写入速度

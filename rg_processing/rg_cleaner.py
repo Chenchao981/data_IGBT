@@ -9,6 +9,13 @@ import re
 from pathlib import Path
 from datetime import datetime
 import logging
+import sys
+
+# 添加项目根目录到路径
+project_root = Path(__file__).parent.parent
+sys.path.append(str(project_root))
+
+from excel_utils import generate_lot_based_filename
 
 class RGCleaner:
     """RG数据清洗器"""
@@ -252,9 +259,12 @@ class RGCleaner:
         # 确保输出目录存在
         self.output_dir.mkdir(parents=True, exist_ok=True)
         
-        # 生成时间戳
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        output_file = self.output_dir / f"RG_{timestamp}.xlsx"
+        # 提取lot_ids用于生成文件名
+        lot_ids = df['lot_ID'].tolist() if 'lot_ID' in df.columns else ['unknown']
+        
+        # 使用lot_id生成文件名
+        filename = generate_lot_based_filename(lot_ids, "RG")
+        output_file = self.output_dir / filename
         
         # 保存到Excel文件 - 使用xlsxwriter引擎提升写入速度
         df.to_excel(output_file, index=False, engine='xlsxwriter')

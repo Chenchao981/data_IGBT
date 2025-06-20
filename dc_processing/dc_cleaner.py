@@ -28,7 +28,7 @@ from excel_utils import (
     write_excel_fast, 
     scan_excel_files, 
     extract_batch_id, 
-    generate_output_filename
+    generate_lot_based_filename
 )
 
 # 配置日志
@@ -208,14 +208,24 @@ class DCDataCleaner:
             final_params = []
             
             for col, param, unit in param_unit_pairs:
-                final_param_name = f"{param}({unit})" if unit else param
-                
                 # 如果参数仍然重复，添加位置区分
                 if param_counts[param] > 1:
                     count = param_counters.get(param, 0) + 1
                     param_counters[param] = count
-                    final_param_name = f"{final_param_name}_{count}" if unit else f"{param}_{count}"
+
+                    # 对于IGSS/ISGS，保持旧的命名方式，因为它们有自己的特殊处理逻辑
+                    if param.upper().startswith('IGSS') or param.upper().startswith('ISGS'):
+                        base_name = f"{param}({unit})" if unit else param
+                        final_param_name = f"{base_name}_{count}"
+                    else:
+                        # 对于其他所有重复参数，应用新的命名规则 VTH -> VTH1(V)
+                        new_param_name = f"{param}{count}"
+                        final_param_name = f"{new_param_name}({unit})" if unit else new_param_name
+                    
                     logger.warning(f"仍有重复参数: {param} -> {final_param_name}")
+                else:
+                    # 没有重复的参数
+                    final_param_name = f"{param}({unit})" if unit else param
                 
                 final_params.append((col, final_param_name))
                 logger.debug(f"最终参数: 列{col} -> {final_param_name}")
@@ -347,8 +357,12 @@ class DCDataCleaner:
             return False
         
         try:
-            # 使用excel_utils生成带时间戳的文件名
-            output_file = self.output_dir / generate_output_filename("DC")
+            # 提取lot_ids用于生成文件名
+            lot_ids = df['lot_ID'].tolist() if 'lot_ID' in df.columns else ['unknown']
+            
+            # 使用lot_id生成文件名
+            filename = generate_lot_based_filename(lot_ids, "DC")
+            output_file = self.output_dir / filename
             
             # 使用excel_utils中的快速写入函数
             success = write_excel_fast(df, output_file, sheet_name='DC_Data')
