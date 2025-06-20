@@ -12,15 +12,16 @@ import os
 import threading
 from pathlib import Path
 from datetime import datetime
+import logging
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QLabel, QLineEdit, QPushButton, 
                              QTextEdit, QRadioButton, QButtonGroup, QGroupBox,
                              QFileDialog, QMessageBox, QProgressBar)
-from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
+from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer, QObject
 from PyQt5.QtGui import QFont, QIcon, QPalette, QColor
 
-# 导入现有的清洗器类
-project_root = Path(__file__).parent.parent  # 项目根目录
+# 将项目根目录添加到Python路径
+project_root = Path(__file__).parent.parent
 sys.path.append(str(project_root / 'dc_processing'))
 sys.path.append(str(project_root / 'dvds_processing'))  
 sys.path.append(str(project_root / 'rg_processing'))
@@ -28,6 +29,20 @@ sys.path.append(str(project_root / 'rg_processing'))
 from dc_cleaner import DCDataCleaner
 from dvds_cleaner import DVDSCleaner
 from rg_cleaner import RGCleaner
+
+class LogEmitter(QObject):
+    """日志信号发射器，因为logging.Handler不能直接继承QObject"""
+    log_received = pyqtSignal(str)
+
+class QtLogHandler(logging.Handler):
+    """自定义日志处理器，将日志记录发送到PyQt信号"""
+    def __init__(self, emitter):
+        super().__init__()
+        self.emitter = emitter
+
+    def emit(self, record):
+        msg = self.format(record)
+        self.emitter.log_received.emit(msg)
 
 class DataCleanerWorker(QThread):
     """数据清洗工作线程"""
@@ -43,9 +58,16 @@ class DataCleanerWorker(QThread):
         self.input_dir = input_dir
         self.output_dir = output_dir
         self.is_cancelled = False
+        self.log_emitter = LogEmitter()  # 创建日志发射器
     
     def run(self):
-        """运行数据清洗任务"""
+        """运行数据清洗任务，并重定向日志"""
+        # 设置日志处理器，用于实时捕获日志
+        handler = QtLogHandler(self.log_emitter)
+        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+        handler.setFormatter(formatter)
+        logging.getLogger().addHandler(handler)
+        
         try:
             self.progress_updated.emit(f"开始{self.cleaner_type}数据清洗...")
             
@@ -61,18 +83,18 @@ class DataCleanerWorker(QThread):
                 
         except Exception as e:
             self.error_occurred.emit(f"清洗过程中发生错误: {str(e)}")
-    
+        finally:
+            # 任务结束后移除处理器，避免重复记录
+            logging.getLogger().removeHandler(handler)
+
     def _run_dc_cleaner(self):
         """运行DC清洗器"""
         try:
-            self.progress_updated.emit("正在初始化DC清洗器...")
+            # 日志现在由QtLogHandler自动捕获，无需在此处发送过多信号
             cleaner = DCDataCleaner(input_dir=self.input_dir, output_dir=self.output_dir)
-            
-            self.progress_updated.emit("正在扫描DC文件...")
             success = cleaner.process_all_dc_files()
             
             if success:
-                self.progress_updated.emit("DC数据清洗完成！")
                 self.finished.emit("DC数据清洗成功完成", True)
             else:
                 self.finished.emit("DC数据清洗失败，请查看日志信息", False)
@@ -83,18 +105,12 @@ class DataCleanerWorker(QThread):
     def _run_dvds_cleaner(self):
         """运行DVDS清洗器"""
         try:
-            self.progress_updated.emit("正在初始化DVDS清洗器...")
-            cleaner = DVDSCleaner(base_dir=str(Path(self.input_dir).parent))
-            
-            # 设置输入和输出目录
+            cleaner = DVDSCleaner(base_dir=str(Path(self.input_dir).parent.parent))
             cleaner.dvds_dir = self.input_dir
             cleaner.output_dir = self.output_dir
-            
-            self.progress_updated.emit("正在处理DVDS数据...")
             output_file = cleaner.process_all()
             
             if output_file:
-                self.progress_updated.emit("DVDS数据清洗完成！")
                 self.finished.emit(f"DVDS数据清洗成功完成\n输出文件: {os.path.basename(output_file)}", True)
             else:
                 self.finished.emit("DVDS数据清洗失败，请查看日志信息", False)
@@ -105,14 +121,10 @@ class DataCleanerWorker(QThread):
     def _run_rg_cleaner(self):
         """运行RG清洗器"""
         try:
-            self.progress_updated.emit("正在初始化RG清洗器...")
             cleaner = RGCleaner(input_dir=self.input_dir, output_dir=self.output_dir)
-            
-            self.progress_updated.emit("正在处理RG数据...")
             output_file = cleaner.run()
             
             if output_file:
-                self.progress_updated.emit("RG数据清洗完成！")
                 self.finished.emit(f"RG数据清洗成功完成\n输出文件: {os.path.basename(output_file)}", True)
             else:
                 self.finished.emit("RG数据清洗失败，请查看日志信息", False)
@@ -138,7 +150,7 @@ class FTDataCleanerGUI(QMainWindow):
     def init_ui(self):
         """初始化用户界面"""
         self.setWindowTitle("FT数据清洗工具")
-        self.setGeometry(100, 100, 600, 500)
+        self.setGeometry(100, 100, 1350, 1125)  # 放大50%的UI尺寸以适应大字体
         
         # 设置应用程序图标（如果有的话）
         # self.setWindowIcon(QIcon('icon.png'))
@@ -149,14 +161,14 @@ class FTDataCleanerGUI(QMainWindow):
         
         # 创建主布局
         main_layout = QVBoxLayout(central_widget)
-        main_layout.setSpacing(20)
-        main_layout.setContentsMargins(30, 30, 30, 30)
+        main_layout.setSpacing(25)
+        main_layout.setContentsMargins(40, 40, 40, 40)
         
         # 标题标签
         title_label = QLabel("FT数据清洗工具")
         title_label.setAlignment(Qt.AlignCenter)
         title_font = QFont()
-        title_font.setPointSize(24)
+        title_font.setPointSize(72)  # 放大2倍的标题字体 (36*2)
         title_font.setBold(True)
         title_label.setFont(title_font)
         main_layout.addWidget(title_label)
@@ -178,7 +190,7 @@ class FTDataCleanerGUI(QMainWindow):
     
     def create_cleaner_type_group(self, main_layout):
         """创建清洗类型选择组"""
-        type_group = QGroupBox("清洗类型选择")
+        type_group = QGroupBox("ASE数据类型选择")
         type_layout = QHBoxLayout(type_group)
         
         # 创建单选按钮组
@@ -196,7 +208,7 @@ class FTDataCleanerGUI(QMainWindow):
         self.cleaner_button_group.addButton(self.dvds_radio)
         self.cleaner_button_group.addButton(self.rg_radio)
         
-        # 连接信号，当清洗类型改变时更新默认路径
+        # 连接信号，当清洗类型改变时记录日志
         self.dc_radio.toggled.connect(self.on_cleaner_type_changed)
         self.dvds_radio.toggled.connect(self.on_cleaner_type_changed)
         self.rg_radio.toggled.connect(self.on_cleaner_type_changed)
@@ -217,7 +229,7 @@ class FTDataCleanerGUI(QMainWindow):
         # 数据文件夹选择
         input_layout = QHBoxLayout()
         input_label = QLabel("数据文件夹:")
-        input_label.setMinimumWidth(100)
+        input_label.setMinimumWidth(120)
         self.input_path_edit = QLineEdit()
         self.input_path_edit.setPlaceholderText("选择包含源数据的文件夹...")
         self.input_browse_btn = QPushButton("选择文件夹...")
@@ -230,7 +242,7 @@ class FTDataCleanerGUI(QMainWindow):
         # 输出文件夹选择
         output_layout = QHBoxLayout()
         output_label = QLabel("输出文件夹:")
-        output_label.setMinimumWidth(100)
+        output_label.setMinimumWidth(120)
         self.output_path_edit = QLineEdit()
         self.output_path_edit.setPlaceholderText("选择输出清洗后数据的文件夹...")
         self.output_browse_btn = QPushButton("选择文件夹...")
@@ -252,8 +264,8 @@ class FTDataCleanerGUI(QMainWindow):
         # 开始清洗按钮 - 居中显示
         self.start_btn = QPushButton("🚀 开始清洗数据")
         self.start_btn.clicked.connect(self.start_cleaning)
-        self.start_btn.setMinimumHeight(50)
-        self.start_btn.setMinimumWidth(200)
+        self.start_btn.setMinimumHeight(75)  # 增大按钮尺寸
+        self.start_btn.setMinimumWidth(300)
         
         # 添加弹性空间使按钮居中
         button_layout.addStretch()
@@ -270,14 +282,14 @@ class FTDataCleanerGUI(QMainWindow):
         # 状态文本显示
         self.status_text = QTextEdit()
         self.status_text.setReadOnly(True)
-        self.status_text.setMaximumHeight(150)
+        self.status_text.setMinimumHeight(250) # 增大状态区域高度
         self.status_text.setPlaceholderText("等待用户操作...")
         
         status_layout.addWidget(self.status_text)
         main_layout.addWidget(status_group)
     
     def set_styles(self):
-        """设置界面样式"""
+        """设置界面样式（放大2倍字体）"""
         self.setStyleSheet("""
             QMainWindow {
                 background-color: #f5f5f5;
@@ -285,9 +297,10 @@ class FTDataCleanerGUI(QMainWindow):
             QGroupBox {
                 font-weight: bold;
                 border: 2px solid #cccccc;
-                border-radius: 5px;
-                margin-top: 10px;
-                padding-top: 5px;
+                border-radius: 8px;
+                margin-top: 1em;
+                padding: 1em;
+                font-size: 32px;
             }
             QGroupBox::title {
                 subcontrol-origin: margin;
@@ -298,9 +311,10 @@ class FTDataCleanerGUI(QMainWindow):
                 background-color: #4CAF50;
                 color: white;
                 border: none;
-                padding: 8px 16px;
-                border-radius: 4px;
+                padding: 10px 20px;
+                border-radius: 5px;
                 font-weight: bold;
+                font-size: 32px;
             }
             QPushButton:hover {
                 background-color: #45a049;
@@ -312,20 +326,18 @@ class FTDataCleanerGUI(QMainWindow):
                 background-color: #cccccc;
                 color: #666666;
             }
-            QLineEdit {
-                padding: 5px;
+            QLineEdit, QTextEdit {
+                padding: 8px;
                 border: 1px solid #ddd;
-                border-radius: 4px;
-            }
-            QTextEdit {
-                border: 1px solid #ddd;
-                border-radius: 4px;
-                background-color: white;
+                border-radius: 5px;
+                font-size: 28px;
             }
             QRadioButton {
-                spacing: 5px;
+                spacing: 8px;
+                font-size: 32px;
             }
             QLabel {
+                font-size: 32px;
                 color: #333;
             }
         """)
@@ -334,7 +346,7 @@ class FTDataCleanerGUI(QMainWindow):
         self.start_btn.setStyleSheet("""
             QPushButton {
                 background-color: #2196F3;
-                font-size: 14px;
+                font-size: 40px;
             }
             QPushButton:hover {
                 background-color: #1976D2;
@@ -388,47 +400,6 @@ class FTDataCleanerGUI(QMainWindow):
             return "RG"
         return None
     
-    def determine_input_directory(self, selected_path, cleaner_type):
-        """
-        智能判断输入目录路径
-        
-        Args:
-            selected_path: 用户选择的路径
-            cleaner_type: 清洗类型 (DC/DVDS/RG)
-        
-        Returns:
-            str: 最终的输入目录路径
-        """
-        selected_path = Path(selected_path)
-        
-        # 情况1: 用户直接选择了具体的数据目录 (如 ASEData/DC)
-        if (selected_path.name == cleaner_type and 
-            selected_path.parent.name == "ASEData"):
-            self.log_message(f"检测到直接选择数据目录: {selected_path}")
-            return str(selected_path)
-        
-        # 情况2: 用户选择了ASEData目录，需要添加类型
-        if selected_path.name == "ASEData":
-            target_dir = selected_path / cleaner_type
-            self.log_message(f"检测到ASEData目录，构建路径: {target_dir}")
-            return str(target_dir)
-        
-        # 情况3: 用户选择了包含ASEData的根目录
-        asedata_dir = selected_path / "ASEData" / cleaner_type
-        if asedata_dir.exists():
-            self.log_message(f"检测到根目录，构建路径: {asedata_dir}")
-            return str(asedata_dir)
-        
-        # 情况4: 检查是否已经是完整的ASEData/{type}路径
-        if "ASEData" in str(selected_path) and cleaner_type in str(selected_path):
-            self.log_message(f"检测到完整ASEData路径: {selected_path}")
-            return str(selected_path)
-        
-        # 默认情况: 尝试在选择的路径下查找ASEData/{type}
-        default_path = selected_path / "ASEData" / cleaner_type
-        self.log_message(f"使用默认路径构建: {default_path}")
-        return str(default_path)
-    
     def on_cleaner_type_changed(self):
         """当清洗类型改变时记录日志"""
         cleaner_type = self.get_selected_cleaner_type()
@@ -444,18 +415,17 @@ class FTDataCleanerGUI(QMainWindow):
         
         # 获取参数
         cleaner_type = self.get_selected_cleaner_type()
-        selected_input_dir = self.input_path_edit.text().strip()
+        input_dir = self.input_path_edit.text().strip()
         output_dir = self.output_path_edit.text().strip()
         
-        # 智能判断用户选择的路径类型
-        input_dir = self.determine_input_directory(selected_input_dir, cleaner_type)
+        self.log_message(f"使用用户选择的输入目录: {input_dir}")
         
         # 检查最终的输入目录是否存在
         if not os.path.exists(input_dir):
             QMessageBox.warning(
                 self, 
                 "目录不存在", 
-                f"找不到数据目录:\n{input_dir}\n\n请选择以下之一：\n1. 包含ASEData文件夹的根目录\n2. 直接选择ASEData/{cleaner_type}数据目录"
+                f"找不到数据目录:\n{input_dir}\n\n请确认路径是否正确。"
             )
             return
         
@@ -468,14 +438,11 @@ class FTDataCleanerGUI(QMainWindow):
         
         # 创建并启动工作线程
         self.worker_thread = DataCleanerWorker(cleaner_type, input_dir, output_dir)
+        self.worker_thread.log_emitter.log_received.connect(self.log_message_from_cleaner)
         self.worker_thread.progress_updated.connect(self.update_progress)
         self.worker_thread.finished.connect(self.cleaning_finished)
         self.worker_thread.error_occurred.connect(self.cleaning_error)
         self.worker_thread.start()
-        
-        self.log_message(f"开始{cleaner_type}数据清洗...")
-        self.log_message(f"输入目录: {input_dir}")
-        self.log_message(f"输出目录: {output_dir}")
     
     def validate_inputs(self):
         """验证输入参数"""
@@ -494,12 +461,20 @@ class FTDataCleanerGUI(QMainWindow):
         return True
     
     def update_progress(self, message):
-        """更新进度信息"""
+        """更新GUI发出的进度信息"""
         self.log_message(message)
+    
+    def log_message_from_cleaner(self, message):
+        """直接从日志处理器接收消息并显示"""
+        self.status_text.append(message)
+        
+        # 自动滚动到底部
+        scrollbar = self.status_text.verticalScrollBar()
+        scrollbar.setValue(scrollbar.maximum())
     
     def cleaning_finished(self, message, success):
         """清洗完成"""
-        self.log_message(message)
+        self.log_message(f"🎉 {message}")
         
         # 恢复开始按钮
         self.start_btn.setEnabled(True)
@@ -523,7 +498,7 @@ class FTDataCleanerGUI(QMainWindow):
         QMessageBox.critical(self, "错误", error_message)
     
     def log_message(self, message):
-        """记录消息到状态显示区域"""
+        """记录GUI本身发出的消息到状态显示区域"""
         timestamp = datetime.now().strftime("%H:%M:%S")
         formatted_message = f"[{timestamp}] {message}"
         self.status_text.append(formatted_message)
@@ -560,7 +535,7 @@ def main():
     
     # 设置应用程序属性
     app.setApplicationName("FT数据清洗工具")
-    app.setApplicationVersion("1.0")
+    app.setApplicationVersion("1.2")
     app.setOrganizationName("cc")
     
     # 创建主窗口
