@@ -1,2 +1,5 @@
 pandas>=1.5.0
-openpyxl>=3.0.0 
+openpyxl>=3.0.0
+PyQt5>=5.15.0
+calamine>=0.2.0
+xlsxwriter>=3.0.0 
